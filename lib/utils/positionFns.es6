@@ -2,9 +2,9 @@ import {isNum, int} from './shims';
 import ReactDOM from 'react-dom';
 import {innerWidth, innerHeight, outerWidth, outerHeight} from './domFns';
 
-export function getBoundPosition(draggable, clientX, clientY) {
+export function getBoundPosition(draggable, offsetX, offsetY) {
   // If no bounds, short-circuit and move on
-  if (!draggable.props.bounds) return [clientX, clientY];
+  if (!draggable.props.bounds) return [offsetX, offsetY];
 
   let bounds = JSON.parse(JSON.stringify(draggable.props.bounds));
   let node = ReactDOM.findDOMNode(draggable);
@@ -25,14 +25,14 @@ export function getBoundPosition(draggable, clientX, clientY) {
   }
 
   // Keep x and y below right and bottom limits...
-  if (isNum(bounds.right)) clientX = Math.min(clientX, bounds.right);
-  if (isNum(bounds.bottom)) clientY = Math.min(clientY, bounds.bottom);
+  if (isNum(bounds.right)) offsetX = Math.min(offsetX, bounds.right);
+  if (isNum(bounds.bottom)) offsetY = Math.min(offsetY, bounds.bottom);
 
   // But above left and top limits.
-  if (isNum(bounds.left)) clientX = Math.max(clientX, bounds.left);
-  if (isNum(bounds.top)) clientY = Math.max(clientY, bounds.top);
+  if (isNum(bounds.left)) offsetX = Math.max(offsetX, bounds.left);
+  if (isNum(bounds.top)) offsetY = Math.max(offsetY, bounds.top);
 
-  return [clientX, clientY];
+  return [offsetX, offsetY];
 }
 
 export function snapToGrid(grid, pendingX, pendingY) {
@@ -49,11 +49,26 @@ export function canDragY(draggable) {
   return draggable.props.axis === 'both' || draggable.props.axis === 'y';
 }
 
-// Get {clientX, clientY} positions from event.
+// Get {clientX/Y, pageX/Y} positions from event.
 export function getControlPosition(e) {
+  // Android Chrome (as of v. 47, anyway) gives bogus values for clientX/Y when the
+  // viewport is zoomed. So, instead, we use the pageX/Y coordinates and adjust for
+  // scrolling, which seems reliable cross-platform.
+  // Of course, because nothing can ever be easy, old versions of IE don't have *any*
+  // values for pageX/Y... so we calculate those in the opposite direction.
   let position = (e.targetTouches && e.targetTouches[0]) || e;
+  let {pageX, pageY} = position;
+  let {pageXOffset, pageYOffset} = window;
+
+  if (pageX === undefined) {
+    pageX = position.clientX + pageXOffset;
+    pageY = position.clientY + pageYOffset;
+  }
+
   return {
-    clientX: position.clientX,
-    clientY: position.clientY
+    pageX: pageX,
+    pageY: pageY,
+    clientX: pageX - pageXOffset,
+    clientY: pageY - pageYOffset
   };
-}
+};

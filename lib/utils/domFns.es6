@@ -1,7 +1,6 @@
-import {findInArray, isFunction, isNum, int} from './shims';
+import {findInArray, isFunction, int} from './shims';
 import browserPrefix from './getPrefix';
 import assign from 'object-assign';
-import ReactDOM from 'react-dom';
 
 let matchesSelectorFunc = '';
 export function matchesSelector(el: Node, selector: string) {
@@ -20,7 +19,7 @@ export function matchesSelector(el: Node, selector: string) {
   return el[matchesSelectorFunc].call(el, selector);
 }
 
-export function addEvent(el: ?Node, event: string, handler: Function) {
+export function addEvent(el: any, event: string, handler: Function) {
   if (!el) { return; }
   if (el.attachEvent) {
     el.attachEvent('on' + event, handler);
@@ -31,7 +30,7 @@ export function addEvent(el: ?Node, event: string, handler: Function) {
   }
 }
 
-export function removeEvent(el: ?Node, event: string, handler: Function) {
+export function removeEvent(el: any, event: string, handler: Function) {
   if (!el) { return; }
   if (el.detachEvent) {
     el.detachEvent('on' + event, handler);
@@ -96,24 +95,6 @@ export function createSVGTransform({x, y}: {x: number, y: number}) {
   return 'translate(' + x + ',' + y + ')';
 }
 
-// User-select Hacks:
-//
-// Useful for preventing blue highlights all over everything when dragging.
-let userSelectStyle = ';user-select: none;';
-if (browserPrefix) {
-  userSelectStyle += '-' + browserPrefix.toLowerCase() + '-user-select: none;';
-}
-
-export function addUserSelectStyles() {
-  let style = document.body.getAttribute('style') || '';
-  document.body.setAttribute('style', style + userSelectStyle);
-}
-
-export function removeUserSelectStyles() {
-  let style = document.body.getAttribute('style') || '';
-  document.body.setAttribute('style', style.replace(userSelectStyle, ''));
-}
-
 export function styleHacks(childStyle = {}) {
   // Workaround IE pointer events; see #51
   // https://github.com/mzabriskie/react-draggable/issues/51#issuecomment-103488278
@@ -122,41 +103,4 @@ export function styleHacks(childStyle = {}) {
   };
 
   return assign(touchHacks, childStyle);
-}
-
-// Create an event exposed by <DraggableCore>
-export function createCoreEvent(draggable, clientX, clientY) {
-  // State changes are often (but not always!) async. We want the latest value.
-  let state = draggable._pendingState || draggable.state;
-  let isStart = !isNum(state.lastX);
-
-  return {
-    node: ReactDOM.findDOMNode(draggable),
-    position: isStart ?
-      // If this is our first move, use the clientX and clientY as last coords.
-      {
-        deltaX: 0, deltaY: 0,
-        lastX: clientX, lastY: clientY,
-        clientX: clientX, clientY: clientY
-      } :
-      // Otherwise calculate proper values.
-      {
-        deltaX: clientX - state.lastX, deltaY: clientY - state.lastY,
-        lastX: state.lastX, lastY: state.lastY,
-        clientX: clientX, clientY: clientY
-      }
-  };
-}
-
-// Create an event exposed by <Draggable>
-export function createUIEvent(draggable, coreEvent) {
-  return {
-    node: ReactDOM.findDOMNode(draggable),
-    position: {
-      left: draggable.state.clientX + coreEvent.position.deltaX,
-      top: draggable.state.clientY + coreEvent.position.deltaY
-    },
-    deltaX: coreEvent.position.deltaX,
-    deltaY: coreEvent.position.deltaY
-  };
 }

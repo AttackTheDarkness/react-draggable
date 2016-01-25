@@ -105,20 +105,42 @@ return /******/ (function(modules) { // webpackBootstrap
 	
 	var _utilsShims = __webpack_require__(7);
 	
-	var _DraggableCore2 = __webpack_require__(10);
+	var _DraggableCore = __webpack_require__(10);
 	
-	var _DraggableCore3 = _interopRequireDefault(_DraggableCore2);
+	var _DraggableCore2 = _interopRequireDefault(_DraggableCore);
 	
 	var _utilsLog = __webpack_require__(11);
 	
 	var _utilsLog2 = _interopRequireDefault(_utilsLog);
 	
+	var _utilsScrollManager = __webpack_require__(12);
+	
+	var _utilsScrollManager2 = _interopRequireDefault(_utilsScrollManager);
+	
+	function createUIEvent(node, position, state) {
+	  var pageX = position.pageX;
+	  var pageY = position.pageY;
+	
+	  var offsetX = pageX - state.startPageX + state.scrollOffsetX;
+	  var offsetY = pageY - state.startPageY + state.scrollOffsetY;
+	
+	  return {
+	    node: node,
+	    position: {
+	      left: offsetX,
+	      top: offsetY
+	    },
+	    deltaX: offsetX - state.lastOffsetX,
+	    deltaY: offsetY - state.lastOffsetY
+	  };
+	}
+	
 	//
 	// Define <Draggable>
 	//
 	
-	var Draggable = (function (_DraggableCore) {
-	  _inherits(Draggable, _DraggableCore);
+	var Draggable = (function (_React$Component) {
+	  _inherits(Draggable, _React$Component);
 	
 	  function Draggable() {
 	    var _this = this;
@@ -128,66 +150,143 @@ return /******/ (function(modules) { // webpackBootstrap
 	    _get(Object.getPrototypeOf(Draggable.prototype), 'constructor', this).apply(this, arguments);
 	
 	    this.state = {
-	      // Whether or not we are currently dragging.
 	      dragging: false,
 	
 	      // Current transform x and y.
-	      clientX: this.props.start.x, clientY: this.props.start.y,
+	      offsetX: this.props.start.x,
+	      offsetY: this.props.start.y,
+	
+	      // Offset due to the current drag.
+	      dragX: 0,
+	      dragY: 0,
 	
 	      // Can only determine if SVG after mounting
 	      isElementSVG: false
 	    };
 	
+	    this.cleanupScrollManager = function () {
+	      if (_this.state.scrollManager) {
+	        _this.state.scrollManager.destroy();
+	      }
+	    };
+	
 	    this.onDragStart = function (e, coreEvent) {
-	      (0, _utilsLog2['default'])('Draggable: onDragStart: %j', coreEvent.position);
+	      (0, _utilsLog2['default'])('Draggable: onDragStart: ', coreEvent.position);
+	
+	      var _coreEvent$position = coreEvent.position;
+	      var pageX = _coreEvent$position.pageX;
+	      var pageY = _coreEvent$position.pageY;
+	
+	      var state = { dragging: true, startPageX: pageX, startPageY: pageY, lastPageX: pageX, lastPageY: pageY, lastOffsetX: 0, lastOffsetY: 0, scrollOffsetX: 0, scrollOffsetY: 0 };
 	
 	      // Short-circuit if user's callback killed it.
-	      var shouldStart = _this.props.onStart(e, (0, _utilsDomFns.createUIEvent)(_this, coreEvent));
+	      var shouldStart = _this.props.onStart(e, createUIEvent(_reactDom2['default'].findDOMNode(_this), coreEvent.position, state));
 	      // Kills start event on core as well, so move handlers are never bound.
 	      if (shouldStart === false) return false;
 	
-	      _this.setState({ dragging: true });
+	      _this.cleanupScrollManager(); // better safe than sorry
+	      state.scrollManager = new _utilsScrollManager2['default']({ draggable: _this, onScroll: _this.handleScroll, scrollThreshold: _this.props.scrollThreshold });
+	
+	      _this.setState(state);
 	    };
 	
-	    this.onDrag = function (e, coreEvent) {
-	      if (!_this.state.dragging) return false;
-	      (0, _utilsLog2['default'])('Draggable: onDrag: %j', coreEvent.position);
+	    this.onMove = function (e, position, state) {
+	      state = state || _this.state;
+	      var uiEvent = createUIEvent(_reactDom2['default'].findDOMNode(_this), position, state);
 	
-	      var uiEvent = (0, _utilsDomFns.createUIEvent)(_this, coreEvent);
+	      var dragX = uiEvent.position.left,
+	          dragY = uiEvent.position.top;
+	
+	      var offsetX = state.offsetX + dragX,
+	          offsetY = state.offsetY + dragY;
+	
+	      // Snap to grid if prop has been provided
+	      if (Array.isArray(_this.props.grid)) {
+	        var _snapToGrid = (0, _utilsPositionFns.snapToGrid)(_this.props.grid, offsetX, offsetY);
+	
+	        var _snapToGrid2 = _slicedToArray(_snapToGrid, 2);
+	
+	        offsetX = _snapToGrid2[0];
+	        offsetY = _snapToGrid2[1];
+	      }
+	
+	      // Keep within bounds.
+	      if (_this.props.bounds) {
+	        var _getBoundPosition = (0, _utilsPositionFns.getBoundPosition)(_this, offsetX, offsetY);
+	
+	        var _getBoundPosition2 = _slicedToArray(_getBoundPosition, 2);
+	
+	        offsetX = _getBoundPosition2[0];
+	        offsetY = _getBoundPosition2[1];
+	      }
+	
+	      dragX = offsetX - state.offsetX;
+	      dragY = offsetY - state.offsetY;
+	
+	      var newState = {
+	        lastOffsetX: uiEvent.position.left,
+	        lastOffsetY: uiEvent.position.top,
+	        dragX: dragX,
+	        dragY: dragY,
+	        lastPageX: position.pageX,
+	        lastPageY: position.pageY
+	      };
 	
 	      // Short-circuit if user's callback killed it.
 	      var shouldUpdate = _this.props.onDrag(e, uiEvent);
 	      if (shouldUpdate === false) return false;
 	
-	      var newState = {
-	        clientX: uiEvent.position.left,
-	        clientY: uiEvent.position.top
-	      };
-	
-	      // Keep within bounds.
-	      if (_this.props.bounds) {
-	        var _getBoundPosition = (0, _utilsPositionFns.getBoundPosition)(_this, newState.clientX, newState.clientY);
-	
-	        var _getBoundPosition2 = _slicedToArray(_getBoundPosition, 2);
-	
-	        newState.clientX = _getBoundPosition2[0];
-	        newState.clientY = _getBoundPosition2[1];
-	      }
-	
 	      _this.setState(newState);
 	    };
 	
-	    this.onDragStop = function (e, coreEvent) {
-	      if (!_this.state.dragging) return false;
+	    this.handleScroll = function (scrollInfo) {
+	      var state = _this.state;
 	
+	      var position = { pageX: _this.state.lastPageX, pageY: _this.state.lastPageY };
+	
+	      if (scrollInfo.isPage) {
+	        // If the scrolling element is the page, the pointer has "moved" in relation
+	        // to the page.
+	        position.pageX = _this.state.lastPageX + scrollInfo.delta.x;
+	        position.pageY = _this.state.lastPageY + scrollInfo.delta.y;
+	      } else {
+	        // If the scrolling element is a child of the page, update the scrollOffset.
+	        var newState = {
+	          scrollOffsetX: _this.state.scrollOffsetX + scrollInfo.delta.x,
+	          scrollOffsetY: _this.state.scrollOffsetY + scrollInfo.delta.y
+	        };
+	
+	        _this.setState(newState);
+	        // setState is async, so let's create an updated state that we can pass through
+	        state = (0, _objectAssign2['default'])({}, _this.state, newState);
+	      }
+	
+	      _this.onMove(scrollInfo.event, position, state);
+	    };
+	
+	    this.onDrag = function (e, coreEvent) {
+	      (0, _utilsLog2['default'])('Draggable: onDrag: ', JSON.stringify(coreEvent.position));
+	
+	      _this.state.scrollManager.checkScroll(coreEvent.position);
+	      _this.onMove(e, coreEvent.position);
+	    };
+	
+	    this.onDragStop = function (e, coreEvent) {
 	      // Short-circuit if user's callback killed it.
-	      var shouldStop = _this.props.onStop(e, (0, _utilsDomFns.createUIEvent)(_this, coreEvent));
+	      var shouldStop = _this.props.onStop(e, createUIEvent(_reactDom2['default'].findDOMNode(_this), coreEvent.position, _this.state));
 	      if (shouldStop === false) return false;
 	
-	      (0, _utilsLog2['default'])('Draggable: onDragStop: %j', coreEvent.position);
+	      (0, _utilsLog2['default'])('Draggable: onDragStop: ', coreEvent.position);
+	
+	      _this.state.scrollManager.destroy();
 	
 	      _this.setState({
-	        dragging: false
+	        scrollManager: null,
+	        dragging: false,
+	        offsetX: _this.state.offsetX + _this.state.dragX,
+	        offsetY: _this.state.offsetY + _this.state.dragY,
+	        dragX: 0,
+	        dragY: 0
 	      });
 	    };
 	  }
@@ -201,6 +300,23 @@ return /******/ (function(modules) { // webpackBootstrap
 	      }
 	    }
 	  }, {
+	    key: 'componentWillUnmount',
+	    value: function componentWillUnmount() {
+	      // Clean up the scroll manager if we're destroyed mid-drag.
+	      this.cleanupScrollManager();
+	    }
+	  }, {
+	    key: 'componentWillReceiveProps',
+	    value: function componentWillReceiveProps(nextProps) {
+	      // If we're modifying the start location, offset our state by the difference.
+	      if (nextProps.start.x !== this.props.start.x || nextProps.start.y !== this.props.start.y) {
+	        this.setState({
+	          offsetX: this.state.offsetX + nextProps.start.x - this.props.start.x,
+	          offsetY: this.state.offsetY + nextProps.start.y - this.props.start.y
+	        });
+	      }
+	    }
+	  }, {
 	    key: 'render',
 	    value: function render() {
 	      var style = undefined,
@@ -211,10 +327,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	      // has a clean slate.
 	      style = (0, _utilsDomFns.createTransform)({
 	        // Set left if horizontal drag is enabled
-	        x: (0, _utilsPositionFns.canDragX)(this) ? this.state.clientX : this.props.start.x,
+	        x: (0, _utilsPositionFns.canDragX)(this) ? this.state.offsetX + this.state.dragX : this.props.start.x,
 	
 	        // Set top if vertical drag is enabled
-	        y: (0, _utilsPositionFns.canDragY)(this) ? this.state.clientY : this.props.start.y
+	        y: (0, _utilsPositionFns.canDragY)(this) ? this.state.offsetY + this.state.dragY : this.props.start.y
 	      }, this.state.isElementSVG);
 	
 	      // If this element was SVG, we use the `transform` attribute.
@@ -237,7 +353,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	      // Reuse the child provided
 	      // This makes it flexible to use whatever element is wanted (div, ul, etc)
 	      return _react2['default'].createElement(
-	        _DraggableCore3['default'],
+	        _DraggableCore2['default'],
 	        _extends({}, this.props, { onStart: this.onDragStart, onDrag: this.onDrag, onStop: this.onDragStop }),
 	        _react2['default'].cloneElement(_react2['default'].Children.only(this.props.children), {
 	          className: className,
@@ -252,7 +368,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	    enumerable: true
 	  }, {
 	    key: 'propTypes',
-	    value: (0, _objectAssign2['default'])({}, _DraggableCore3['default'].propTypes, {
+	    value: (0, _objectAssign2['default'])({}, _DraggableCore2['default'].propTypes, {
 	      /**
 	       * `axis` determines which axis the draggable can move.
 	       *
@@ -298,6 +414,25 @@ return /******/ (function(modules) { // webpackBootstrap
 	      }), _react.PropTypes.oneOf(['parent', false])]),
 	
 	      /**
+	       * `grid` specifies the x and y that dragging should snap to.
+	       *
+	       * Example:
+	       *
+	       * ```jsx
+	       *   let App = React.createClass({
+	       *       render: function () {
+	       *           return (
+	       *               <Draggable grid={[25, 25]}>
+	       *                   <div>I snap to a 25 x 25 grid</div>
+	       *               </Draggable>
+	       *           );
+	       *       }
+	       *   });
+	       * ```
+	       */
+	      grid: _react.PropTypes.arrayOf(_react.PropTypes.number),
+	
+	      /**
 	       * `start` specifies the x and y that the dragged item should start at
 	       *
 	       * Example:
@@ -339,6 +474,28 @@ return /******/ (function(modules) { // webpackBootstrap
 	      zIndex: _react.PropTypes.number,
 	
 	      /**
+	       * `scrollThreshold` specifies how close the user needs to drag from the edge of
+	       * the body / scrollParent before scrolling starts. Value is in px.
+	       * 0 or negative values will disable the autoscrolling.
+	       * Default is 40.
+	       *
+	       * Example:
+	       *
+	       * ```jsx
+	       *   let App = React.createClass({
+	       *       render: function () {
+	       *           return (
+	       *               <Draggable scrollThreshold={100}>
+	       *                   <div>Drag me close to an edge</div>
+	       *               </Draggable>
+	       *           );
+	       *       }
+	       *   });
+	       * ```
+	       */
+	      scrollThreshold: _react.PropTypes.number,
+	
+	      /**
 	       * These properties should be defined on the child, not here.
 	       */
 	      className: _utilsShims.dontSetMe,
@@ -348,17 +505,18 @@ return /******/ (function(modules) { // webpackBootstrap
 	    enumerable: true
 	  }, {
 	    key: 'defaultProps',
-	    value: (0, _objectAssign2['default'])({}, _DraggableCore3['default'].defaultProps, {
+	    value: (0, _objectAssign2['default'])({}, _DraggableCore2['default'].defaultProps, {
 	      axis: 'both',
 	      bounds: false,
 	      start: { x: 0, y: 0 },
-	      zIndex: NaN
+	      zIndex: NaN,
+	      scrollThreshold: 40
 	    }),
 	    enumerable: true
 	  }]);
 	
 	  return Draggable;
-	})(_DraggableCore3['default']);
+	})(_react2['default'].Component);
 	
 	exports['default'] = Draggable;
 	module.exports = exports['default'];
@@ -379,8 +537,8 @@ return /******/ (function(modules) { // webpackBootstrap
 /* 4 */
 /***/ function(module, exports, __webpack_require__) {
 
-	var __WEBPACK_AMD_DEFINE_RESULT__;/*!
-	  Copyright (c) 2015 Jed Watson.
+	var __WEBPACK_AMD_DEFINE_ARRAY__, __WEBPACK_AMD_DEFINE_RESULT__;/*!
+	  Copyright (c) 2016 Jed Watson.
 	  Licensed under the MIT License (MIT), see
 	  http://jedwatson.github.io/classnames
 	*/
@@ -392,7 +550,7 @@ return /******/ (function(modules) { // webpackBootstrap
 		var hasOwn = {}.hasOwnProperty;
 	
 		function classNames () {
-			var classes = '';
+			var classes = [];
 	
 			for (var i = 0; i < arguments.length; i++) {
 				var arg = arguments[i];
@@ -401,28 +559,28 @@ return /******/ (function(modules) { // webpackBootstrap
 				var argType = typeof arg;
 	
 				if (argType === 'string' || argType === 'number') {
-					classes += ' ' + arg;
+					classes.push(arg);
 				} else if (Array.isArray(arg)) {
-					classes += ' ' + classNames.apply(null, arg);
+					classes.push(classNames.apply(null, arg));
 				} else if (argType === 'object') {
 					for (var key in arg) {
 						if (hasOwn.call(arg, key) && arg[key]) {
-							classes += ' ' + key;
+							classes.push(key);
 						}
 					}
 				}
 			}
 	
-			return classes.substr(1);
+			return classes.join(' ');
 		}
 	
 		if (typeof module !== 'undefined' && module.exports) {
 			module.exports = classNames;
 		} else if (true) {
 			// register as 'classnames', consistent with npm package name
-			!(__WEBPACK_AMD_DEFINE_RESULT__ = function () {
+			!(__WEBPACK_AMD_DEFINE_ARRAY__ = [], __WEBPACK_AMD_DEFINE_RESULT__ = function () {
 				return classNames;
-			}.call(exports, __webpack_require__, exports, module), __WEBPACK_AMD_DEFINE_RESULT__ !== undefined && (module.exports = __WEBPACK_AMD_DEFINE_RESULT__));
+			}.apply(exports, __WEBPACK_AMD_DEFINE_ARRAY__), __WEBPACK_AMD_DEFINE_RESULT__ !== undefined && (module.exports = __WEBPACK_AMD_DEFINE_RESULT__));
 		} else {
 			window.classNames = classNames;
 		}
@@ -493,11 +651,7 @@ return /******/ (function(modules) { // webpackBootstrap
 	exports.createTransform = createTransform;
 	exports.createCSSTransform = createCSSTransform;
 	exports.createSVGTransform = createSVGTransform;
-	exports.addUserSelectStyles = addUserSelectStyles;
-	exports.removeUserSelectStyles = removeUserSelectStyles;
 	exports.styleHacks = styleHacks;
-	exports.createCoreEvent = createCoreEvent;
-	exports.createUIEvent = createUIEvent;
 	
 	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { 'default': obj }; }
 	
@@ -510,10 +664,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	var _objectAssign = __webpack_require__(5);
 	
 	var _objectAssign2 = _interopRequireDefault(_objectAssign);
-	
-	var _reactDom = __webpack_require__(3);
-	
-	var _reactDom2 = _interopRequireDefault(_reactDom);
 	
 	var matchesSelectorFunc = '';
 	
@@ -531,7 +681,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	}
 	
 	function addEvent(el, event, handler) {
-	  if (el != null && !(el instanceof Node)) throw new TypeError('Value of argument \'el\' violates contract, expected null or Node got ' + (el === null ? 'null' : el instanceof Object && el.constructor ? el.constructor.name : typeof el));
 	  if (typeof event !== 'string') throw new TypeError('Value of argument \'event\' violates contract, expected string got ' + (event === null ? 'null' : event instanceof Object && event.constructor ? event.constructor.name : typeof event));
 	  if (typeof handler !== 'function') throw new TypeError('Value of argument \'handler\' violates contract, expected function got ' + (handler === null ? 'null' : handler instanceof Object && handler.constructor ? handler.constructor.name : typeof handler));
 	
@@ -548,7 +697,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	}
 	
 	function removeEvent(el, event, handler) {
-	  if (el != null && !(el instanceof Node)) throw new TypeError('Value of argument \'el\' violates contract, expected null or Node got ' + (el === null ? 'null' : el instanceof Object && el.constructor ? el.constructor.name : typeof el));
 	  if (typeof event !== 'string') throw new TypeError('Value of argument \'event\' violates contract, expected string got ' + (event === null ? 'null' : event instanceof Object && event.constructor ? event.constructor.name : typeof event));
 	  if (typeof handler !== 'function') throw new TypeError('Value of argument \'handler\' violates contract, expected function got ' + (handler === null ? 'null' : handler instanceof Object && handler.constructor ? handler.constructor.name : typeof handler));
 	
@@ -642,24 +790,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  })();
 	}
 	
-	// User-select Hacks:
-	//
-	// Useful for preventing blue highlights all over everything when dragging.
-	var userSelectStyle = ';user-select: none;';
-	if (_getPrefix2['default']) {
-	  userSelectStyle += '-' + _getPrefix2['default'].toLowerCase() + '-user-select: none;';
-	}
-	
-	function addUserSelectStyles() {
-	  var style = document.body.getAttribute('style') || '';
-	  document.body.setAttribute('style', style + userSelectStyle);
-	}
-	
-	function removeUserSelectStyles() {
-	  var style = document.body.getAttribute('style') || '';
-	  document.body.setAttribute('style', style.replace(userSelectStyle, ''));
-	}
-	
 	function styleHacks() {
 	  var childStyle = arguments.length <= 0 || arguments[0] === undefined ? {} : arguments[0];
 	
@@ -670,45 +800,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	  };
 	
 	  return (0, _objectAssign2['default'])(touchHacks, childStyle);
-	}
-	
-	// Create an event exposed by <DraggableCore>
-	
-	function createCoreEvent(draggable, clientX, clientY) {
-	  // State changes are often (but not always!) async. We want the latest value.
-	  var state = draggable._pendingState || draggable.state;
-	  var isStart = !(0, _shims.isNum)(state.lastX);
-	
-	  return {
-	    node: _reactDom2['default'].findDOMNode(draggable),
-	    position: isStart ?
-	    // If this is our first move, use the clientX and clientY as last coords.
-	    {
-	      deltaX: 0, deltaY: 0,
-	      lastX: clientX, lastY: clientY,
-	      clientX: clientX, clientY: clientY
-	    } :
-	    // Otherwise calculate proper values.
-	    {
-	      deltaX: clientX - state.lastX, deltaY: clientY - state.lastY,
-	      lastX: state.lastX, lastY: state.lastY,
-	      clientX: clientX, clientY: clientY
-	    }
-	  };
-	}
-	
-	// Create an event exposed by <Draggable>
-	
-	function createUIEvent(draggable, coreEvent) {
-	  return {
-	    node: _reactDom2['default'].findDOMNode(draggable),
-	    position: {
-	      left: draggable.state.clientX + coreEvent.position.deltaX,
-	      top: draggable.state.clientY + coreEvent.position.deltaY
-	    },
-	    deltaX: coreEvent.position.deltaX,
-	    deltaY: coreEvent.position.deltaY
-	  };
 	}
 
 /***/ },
@@ -804,9 +895,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	
 	var _domFns = __webpack_require__(6);
 	
-	function getBoundPosition(draggable, clientX, clientY) {
+	function getBoundPosition(draggable, offsetX, offsetY) {
 	  // If no bounds, short-circuit and move on
-	  if (!draggable.props.bounds) return [clientX, clientY];
+	  if (!draggable.props.bounds) return [offsetX, offsetY];
 	
 	  var bounds = JSON.parse(JSON.stringify(draggable.props.bounds));
 	  var node = _reactDom2['default'].findDOMNode(draggable);
@@ -825,14 +916,14 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 	
 	  // Keep x and y below right and bottom limits...
-	  if ((0, _shims.isNum)(bounds.right)) clientX = Math.min(clientX, bounds.right);
-	  if ((0, _shims.isNum)(bounds.bottom)) clientY = Math.min(clientY, bounds.bottom);
+	  if ((0, _shims.isNum)(bounds.right)) offsetX = Math.min(offsetX, bounds.right);
+	  if ((0, _shims.isNum)(bounds.bottom)) offsetY = Math.min(offsetY, bounds.bottom);
 	
 	  // But above left and top limits.
-	  if ((0, _shims.isNum)(bounds.left)) clientX = Math.max(clientX, bounds.left);
-	  if ((0, _shims.isNum)(bounds.top)) clientY = Math.max(clientY, bounds.top);
+	  if ((0, _shims.isNum)(bounds.left)) offsetX = Math.max(offsetX, bounds.left);
+	  if ((0, _shims.isNum)(bounds.top)) offsetY = Math.max(offsetY, bounds.top);
 	
-	  return [clientX, clientY];
+	  return [offsetX, offsetY];
 	}
 	
 	function snapToGrid(grid, pendingX, pendingY) {
@@ -849,15 +940,34 @@ return /******/ (function(modules) { // webpackBootstrap
 	  return draggable.props.axis === 'both' || draggable.props.axis === 'y';
 	}
 	
-	// Get {clientX, clientY} positions from event.
+	// Get {clientX/Y, pageX/Y} positions from event.
 	
 	function getControlPosition(e) {
+	  // Android Chrome (as of v. 47, anyway) gives bogus values for clientX/Y when the
+	  // viewport is zoomed. So, instead, we use the pageX/Y coordinates and adjust for
+	  // scrolling, which seems reliable cross-platform.
+	  // Of course, because nothing can ever be easy, old versions of IE don't have *any*
+	  // values for pageX/Y... so we calculate those in the opposite direction.
 	  var position = e.targetTouches && e.targetTouches[0] || e;
+	  var pageX = position.pageX;
+	  var pageY = position.pageY;
+	  var pageXOffset = window.pageXOffset;
+	  var pageYOffset = window.pageYOffset;
+	
+	  if (pageX === undefined) {
+	    pageX = position.clientX + pageXOffset;
+	    pageY = position.clientY + pageYOffset;
+	  }
+	
 	  return {
-	    clientX: position.clientX,
-	    clientY: position.clientY
+	    pageX: pageX,
+	    pageY: pageY,
+	    clientX: pageX - pageXOffset,
+	    clientY: pageY - pageYOffset
 	  };
 	}
+	
+	;
 
 /***/ },
 /* 10 */
@@ -868,8 +978,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	Object.defineProperty(exports, '__esModule', {
 	  value: true
 	});
-	
-	var _slicedToArray = (function () { function sliceIterator(arr, i) { var _arr = []; var _n = true; var _d = false; var _e = undefined; try { for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i['return']) _i['return'](); } finally { if (_d) throw _e; } } return _arr; } return function (arr, i) { if (Array.isArray(arr)) { return arr; } else if (Symbol.iterator in Object(arr)) { return sliceIterator(arr, i); } else { throw new TypeError('Invalid attempt to destructure non-iterable instance'); } }; })();
 	
 	var _createClass = (function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ('value' in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; })();
 	
@@ -884,6 +992,10 @@ return /******/ (function(modules) { // webpackBootstrap
 	var _react = __webpack_require__(2);
 	
 	var _react2 = _interopRequireDefault(_react);
+	
+	var _reactDom = __webpack_require__(3);
+	
+	var _reactDom2 = _interopRequireDefault(_reactDom);
 	
 	var _utilsDomFns = __webpack_require__(6);
 	
@@ -909,238 +1021,20 @@ return /******/ (function(modules) { // webpackBootstrap
 	  }
 	};
 	
-	// Default to mouse events.
-	var dragEventFor = eventsFor.mouse;
-	
 	//
 	// Define <DraggableCore>.
 	//
-	// <DraggableCore> is for advanced usage of <Draggable>. It maintains minimal internal state so it can
-	// work well with libraries that require more control over the element.
+	// <DraggableCore> listens to mouse/touch events and calls out into props.onStart,
+	// props.onDrag and props.onStop whenever a drag starts, moves, or stops, respectively.
+	// <DraggableCore> deals in position values relative to the viewport (clientX/Y) and
+	// document (pageX/Y); consume whichever you prefer, but using pageX/Y makes dealing
+	// with document scrolling much easier.
 	//
 	
 	var DraggableCore = (function (_React$Component) {
 	  _inherits(DraggableCore, _React$Component);
 	
-	  function DraggableCore() {
-	    var _this = this;
-	
-	    _classCallCheck(this, DraggableCore);
-	
-	    _get(Object.getPrototypeOf(DraggableCore.prototype), 'constructor', this).apply(this, arguments);
-	
-	    this.state = {
-	      dragging: false,
-	      // Used while dragging to determine deltas.
-	      lastX: null, lastY: null
-	    };
-	
-	    this.handleDragStart = function (e) {
-	      // Make it possible to attach event handlers on top of this one.
-	      _this.props.onMouseDown(e);
-	
-	      // Only accept left-clicks.
-	      if (!_this.props.allowAnyClick && typeof e.button === 'number' && e.button !== 0) return false;
-	
-	      // Short circuit if handle or cancel prop was provided and selector doesn't match.
-	      if (_this.props.disabled || _this.props.handle && !(0, _utilsDomFns.matchesSelector)(e.target, _this.props.handle) || _this.props.cancel && (0, _utilsDomFns.matchesSelector)(e.target, _this.props.cancel)) {
-	        return;
-	      }
-	
-	      // Set touch identifier in component state if this is a touch event. This allows us to
-	      // distinguish between individual touches on multitouch screens by identifying which
-	      // touchpoint was set to this element.
-	      if (e.targetTouches) {
-	        _this.setState({ touchIdentifier: e.targetTouches[0].identifier });
-	      }
-	
-	      // Add a style to the body to disable user-select. This prevents text from
-	      // being selected all over the page.
-	      if (_this.props.enableUserSelectHack) (0, _utilsDomFns.addUserSelectStyles)();
-	
-	      // Get the current drag point from the event. This is used as the offset.
-	
-	      var _getControlPosition = (0, _utilsPositionFns.getControlPosition)(e);
-	
-	      var clientX = _getControlPosition.clientX;
-	      var clientY = _getControlPosition.clientY;
-	
-	      // Create an event object with all the data parents need to make a decision here.
-	      var coreEvent = (0, _utilsDomFns.createCoreEvent)(_this, clientX, clientY);
-	
-	      (0, _utilsLog2['default'])('DraggableCore: handleDragStart: %j', coreEvent.position);
-	
-	      // Call event handler. If it returns explicit false, cancel.
-	      (0, _utilsLog2['default'])('calling', _this.props.onStart);
-	      var shouldUpdate = _this.props.onStart(e, coreEvent);
-	      if (shouldUpdate === false) return;
-	
-	      // Initiate dragging. Set the current x and y as offsets
-	      // so we know how much we've moved during the drag. This allows us
-	      // to drag elements around even if they have been moved, without issue.
-	      _this.setState({
-	        dragging: true,
-	
-	        lastX: clientX,
-	        lastY: clientY,
-	        // Stored so we can adjust our offset if scrolled.
-	        scrollX: document.body.scrollLeft,
-	        scrollY: document.body.scrollTop
-	      });
-	
-	      // Translate el on page scroll.
-	      (0, _utilsDomFns.addEvent)(document, 'scroll', _this.handleScroll);
-	      // Add events to the document directly so we catch when the user's mouse/touch moves outside of
-	      // this element. We use different events depending on whether or not we have detected that this
-	      // is a touch-capable device.
-	      (0, _utilsDomFns.addEvent)(document, dragEventFor.move, _this.handleDrag);
-	      (0, _utilsDomFns.addEvent)(document, dragEventFor.stop, _this.handleDragStop);
-	    };
-	
-	    this.handleDrag = function (e) {
-	      // Return if this is a touch event, but not the correct one for this element
-	      if (e.targetTouches && e.targetTouches[0].identifier !== _this.state.touchIdentifier) return;
-	
-	      var _getControlPosition2 = (0, _utilsPositionFns.getControlPosition)(e);
-	
-	      var clientX = _getControlPosition2.clientX;
-	      var clientY = _getControlPosition2.clientY;
-	
-	      // Snap to grid if prop has been provided
-	      if (Array.isArray(_this.props.grid)) {
-	        var deltaX = clientX - _this.state.lastX,
-	            deltaY = clientY - _this.state.lastY;
-	
-	        var _snapToGrid = (0, _utilsPositionFns.snapToGrid)(_this.props.grid, deltaX, deltaY);
-	
-	        var _snapToGrid2 = _slicedToArray(_snapToGrid, 2);
-	
-	        deltaX = _snapToGrid2[0];
-	        deltaY = _snapToGrid2[1];
-	
-	        if (!deltaX && !deltaY) return; // skip useless drag
-	        clientX = _this.state.lastX + deltaX, clientY = _this.state.lastY + deltaY;
-	      }
-	
-	      var coreEvent = (0, _utilsDomFns.createCoreEvent)(_this, clientX, clientY);
-	
-	      (0, _utilsLog2['default'])('DraggableCore: handleDrag: %j', coreEvent.position);
-	
-	      // Call event handler. If it returns explicit false, trigger end.
-	      var shouldUpdate = _this.props.onDrag(e, coreEvent);
-	      if (shouldUpdate === false) {
-	        _this.handleDragStop({});
-	        return;
-	      }
-	
-	      _this.setState({
-	        lastX: clientX,
-	        lastY: clientY
-	      });
-	    };
-	
-	    this.handleDragStop = function (e) {
-	      if (!_this.state.dragging) return;
-	
-	      // Short circuit if this is not the correct touch event. `changedTouches` contains all
-	      // touch points that have been removed from the surface.
-	      if (e.changedTouches && e.changedTouches[0].identifier !== _this.state.touchIdentifier) return;
-	
-	      // Remove user-select hack
-	      if (_this.props.enableUserSelectHack) (0, _utilsDomFns.removeUserSelectStyles)();
-	
-	      var _getControlPosition3 = (0, _utilsPositionFns.getControlPosition)(e);
-	
-	      var clientX = _getControlPosition3.clientX;
-	      var clientY = _getControlPosition3.clientY;
-	
-	      var coreEvent = (0, _utilsDomFns.createCoreEvent)(_this, clientX, clientY);
-	
-	      (0, _utilsLog2['default'])('DraggableCore: handleDragStop: %j', coreEvent.position);
-	
-	      // Reset the el.
-	      _this.setState({
-	        dragging: false,
-	        lastX: null,
-	        lastY: null
-	      });
-	
-	      // Call event handler
-	      _this.props.onStop(e, coreEvent);
-	
-	      // Remove event handlers
-	      (0, _utilsLog2['default'])('DraggableCore: Removing handlers');
-	      (0, _utilsDomFns.removeEvent)(document, 'scroll', _this.handleScroll);
-	      (0, _utilsDomFns.removeEvent)(document, dragEventFor.move, _this.handleDrag);
-	      (0, _utilsDomFns.removeEvent)(document, dragEventFor.stop, _this.handleDragStop);
-	    };
-	
-	    this.handleScroll = function (e) {
-	      var s = _this.state,
-	          x = document.body.scrollLeft,
-	          y = document.body.scrollTop;
-	
-	      // Create the usual event, but make the scroll offset our deltas.
-	      var coreEvent = (0, _utilsDomFns.createCoreEvent)(_this);
-	      coreEvent.position.deltaX = x - s.scrollX;
-	      coreEvent.position.deltaY = y - s.scrollY;
-	
-	      _this.setState({
-	        lastX: s.lastX + coreEvent.position.deltaX,
-	        lastY: s.lastY + coreEvent.position.deltaY
-	      });
-	
-	      _this.props.onDrag(e, coreEvent);
-	    };
-	
-	    this.onMouseDown = function (e) {
-	      // HACK: Prevent 'ghost click' which happens 300ms after touchstart if the event isn't cancelled.
-	      // We don't cancel the event on touchstart because of #37; we might want to make a scrollable item draggable.
-	      // More on ghost clicks: http://ariatemplates.com/blog/2014/05/ghost-clicks-in-mobile-browsers/
-	      if (dragEventFor === eventsFor.touch) {
-	        return e.preventDefault();
-	      }
-	
-	      return _this.handleDragStart(e);
-	    };
-	
-	    this.onTouchStart = function (e) {
-	      // We're on a touch device now, so change the event handlers
-	      dragEventFor = eventsFor.touch;
-	
-	      return _this.handleDragStart(e);
-	    };
-	  }
-	
-	  _createClass(DraggableCore, [{
-	    key: 'componentWillUnmount',
-	    value: function componentWillUnmount() {
-	      // Remove any leftover event handlers. Remove both touch and mouse handlers in case
-	      // some browser quirk caused a touch event to fire during a mouse move, or vice versa.
-	      (0, _utilsDomFns.removeEvent)(document, eventsFor.mouse.move, this.handleDrag);
-	      (0, _utilsDomFns.removeEvent)(document, eventsFor.touch.move, this.handleDrag);
-	      (0, _utilsDomFns.removeEvent)(document, eventsFor.mouse.stop, this.handleDragStop);
-	      (0, _utilsDomFns.removeEvent)(document, eventsFor.touch.stop, this.handleDragStop);
-	      (0, _utilsDomFns.removeEvent)(document, 'scroll', this.handleScroll);
-	      if (this.props.enableUserSelectHack) (0, _utilsDomFns.removeUserSelectStyles)();
-	    }
-	  }, {
-	    key: 'render',
-	    value: function render() {
-	      // Reuse the child provided
-	      // This makes it flexible to use whatever element is wanted (div, ul, etc)
-	      return _react2['default'].cloneElement(_react2['default'].Children.only(this.props.children), {
-	        style: (0, _utilsDomFns.styleHacks)(this.props.children.props.style),
-	
-	        // Note: mouseMove handler is attached to document so it will still function
-	        // when the user drags quickly and leaves the bounds of the element.
-	        onMouseDown: this.onMouseDown,
-	        onTouchStart: this.onTouchStart,
-	        onMouseUp: this.handleDragStop,
-	        onTouchEnd: this.handleDragStop
-	      });
-	    }
-	  }], [{
+	  _createClass(DraggableCore, null, [{
 	    key: 'displayName',
 	    value: 'DraggableCore',
 	    enumerable: true
@@ -1174,32 +1068,6 @@ return /******/ (function(modules) { // webpackBootstrap
 	       * ```
 	       */
 	      disabled: _react.PropTypes.bool,
-	
-	      /**
-	       * By default, we add 'user-select:none' attributes to the document body
-	       * to prevent ugly text selection during drag. If this is causing problems
-	       * for your app, set this to `false`.
-	       */
-	      enableUserSelectHack: _react.PropTypes.bool,
-	
-	      /**
-	       * `grid` specifies the x and y that dragging should snap to.
-	       *
-	       * Example:
-	       *
-	       * ```jsx
-	       *   let App = React.createClass({
-	       *       render: function () {
-	       *           return (
-	       *               <Draggable grid={[25, 25]}>
-	       *                   <div>I snap to a 25 x 25 grid</div>
-	       *               </Draggable>
-	       *           );
-	       *       }
-	       *   });
-	       * ```
-	       */
-	      grid: _react.PropTypes.arrayOf(_react.PropTypes.number),
 	
 	      /**
 	       * `handle` specifies a selector to be used as the handle that initiates drag.
@@ -1327,10 +1195,9 @@ return /******/ (function(modules) { // webpackBootstrap
 	      allowAnyClick: false, // by default only accept left click
 	      cancel: null,
 	      disabled: false,
-	      enableUserSelectHack: true,
 	      handle: null,
-	      grid: null,
 	      transform: null,
+	      eatDragEvents: true,
 	      onStart: function onStart() {},
 	      onDrag: function onDrag() {},
 	      onStop: function onStop() {},
@@ -1339,18 +1206,181 @@ return /******/ (function(modules) { // webpackBootstrap
 	    enumerable: true
 	  }]);
 	
+	  function DraggableCore(props) {
+	    var _this = this;
+	
+	    _classCallCheck(this, DraggableCore);
+	
+	    _get(Object.getPrototypeOf(DraggableCore.prototype), 'constructor', this).call(this, props);
+	    this.state = {
+	      dragging: false
+	    };
+	
+	    this.createCoreEvent = function (position) {
+	      var clientX = position.clientX;
+	      var clientY = position.clientY;
+	      var pageX = position.pageX;
+	      var pageY = position.pageY;
+	
+	      return {
+	        node: _reactDom2['default'].findDOMNode(_this),
+	        position: {
+	          clientX: clientX, clientY: clientY,
+	          pageX: pageX, pageY: pageY
+	        }
+	      };
+	    };
+	
+	    this.eatDragEvent = function (e) {
+	      // Prevent the default behavior, unless the consumer's told us explicitly not to.
+	      // This prevents undesirable behavior like selecting text (whilst using the mouse) or
+	      // spurious scrolling (on a touch device).
+	      _this.props.eatDragEvents && e && e.preventDefault && e.preventDefault();
+	    };
+	
+	    this.handleDragStart = function (e, dragType) {
+	      if (_this.state.dragging) return;
+	
+	      var dragEventFor = eventsFor[dragType];
+	
+	      // Make it possible to attach event handlers on top of this one.
+	      _this.props.onMouseDown(e);
+	
+	      // Only accept left-clicks.
+	      if (!_this.props.allowAnyClick && typeof e.button === 'number' && e.button !== 0) return false;
+	
+	      // Short circuit if handle or cancel prop was provided and selector doesn't match.
+	      if (_this.props.disabled || _this.props.handle && !(0, _utilsDomFns.matchesSelector)(e.target, _this.props.handle) || _this.props.cancel && (0, _utilsDomFns.matchesSelector)(e.target, _this.props.cancel)) {
+	        return;
+	      }
+	
+	      // Create an event object with all the data parents need to make a decision here.
+	      var coreEvent = _this.createCoreEvent((0, _utilsPositionFns.getControlPosition)(e));
+	
+	      (0, _utilsLog2['default'])('DraggableCore: handleDragStart: ', coreEvent.position);
+	
+	      // Call event handler. If it returns explicit false, cancel.
+	      var shouldUpdate = _this.props.onStart(e, coreEvent);
+	      if (shouldUpdate === false) return;
+	
+	      // Set touch identifier in component state if this is a touch event. This allows us to
+	      // distinguish between individual touches on multitouch screens by identifying which
+	      // touchpoint was set to this element.
+	      if (e.targetTouches) {
+	        _this.setState({ touchIdentifier: e.targetTouches[0].identifier });
+	      }
+	
+	      _this.eatDragEvent(e);
+	
+	      // Initiate dragging. Set the current x and y as offsets
+	      // so we know how much we've moved during the drag. This allows us
+	      // to drag elements around even if they have been moved, without issue.
+	      _this.setState({
+	        dragging: dragType
+	      });
+	
+	      // Add events to the document directly so we catch when the user's mouse/touch moves outside of
+	      // this element. We use different events depending on whether or not we have detected that this
+	      // is a touch-capable device.
+	      (0, _utilsDomFns.addEvent)(document, dragEventFor.move, _this.handleDrag);
+	      (0, _utilsDomFns.addEvent)(document, dragEventFor.stop, _this.handleDragStop);
+	    };
+	
+	    this.handleDrag = function (e) {
+	      if (!_this.state.dragging) return;
+	
+	      // Return if this is a touch event, but not the correct one for this element
+	      if (e.targetTouches && e.targetTouches[0].identifier !== _this.state.touchIdentifier) return;
+	
+	      _this.eatDragEvent(e);
+	
+	      var coreEvent = _this.createCoreEvent((0, _utilsPositionFns.getControlPosition)(e));
+	
+	      (0, _utilsLog2['default'])('DraggableCore: handleDrag: ', coreEvent.position);
+	
+	      // Call event handler. If it returns explicit false, trigger end.
+	      var shouldUpdate = _this.props.onDrag(e, coreEvent);
+	      if (shouldUpdate === false) {
+	        _this.handleDragStop(e);
+	        return;
+	      }
+	    };
+	
+	    this.handleDragStop = function (e) {
+	      if (!_this.state.dragging) return;
+	
+	      // Short circuit if this is not the correct touch event. `changedTouches` contains all
+	      // touch points that have been removed from the surface.
+	      if (e.changedTouches && e.changedTouches[0].identifier !== _this.state.touchIdentifier) return;
+	
+	      var dragEventFor = eventsFor[_this.state.dragging];
+	
+	      _this.eatDragEvent(e);
+	
+	      var coreEvent = _this.createCoreEvent((0, _utilsPositionFns.getControlPosition)(e));
+	
+	      (0, _utilsLog2['default'])('DraggableCore: handleDragStop: ', coreEvent.position);
+	
+	      // Reset the el.
+	      _this.setState({
+	        dragging: null
+	      });
+	
+	      // Call event handler
+	      _this.props.onStop(e, coreEvent);
+	
+	      // Remove event handlers
+	      (0, _utilsLog2['default'])('DraggableCore: Removing handlers');
+	      (0, _utilsDomFns.removeEvent)(document, dragEventFor.move, _this.handleDrag);
+	      (0, _utilsDomFns.removeEvent)(document, dragEventFor.stop, _this.handleDragStop);
+	    };
+	
+	    this.onMouseDown = function (e) {
+	      return _this.handleDragStart(e, 'mouse');
+	    };
+	
+	    this.onTouchStart = function (e) {
+	      return _this.handleDragStart(e, 'touch');
+	    };
+	  }
+	
+	  _createClass(DraggableCore, [{
+	    key: 'componentWillUnmount',
+	    value: function componentWillUnmount() {
+	      // Remove any leftover event handlers. Remove both touch and mouse handlers in case
+	      // some browser quirk caused a touch event to fire during a mouse move, or vice versa.
+	      (0, _utilsDomFns.removeEvent)(document, eventsFor.mouse.move, this.handleDrag);
+	      (0, _utilsDomFns.removeEvent)(document, eventsFor.touch.move, this.handleDrag);
+	      (0, _utilsDomFns.removeEvent)(document, eventsFor.mouse.stop, this.handleDragStop);
+	      (0, _utilsDomFns.removeEvent)(document, eventsFor.touch.stop, this.handleDragStop);
+	    }
+	  }, {
+	    key: 'render',
+	    value: function render() {
+	      // Reuse the child provided
+	      // This makes it flexible to use whatever element is wanted (div, ul, etc)
+	      return _react2['default'].cloneElement(_react2['default'].Children.only(this.props.children), {
+	        style: (0, _utilsDomFns.styleHacks)(this.props.children.props.style),
+	
+	        // Note: mouseMove handler is attached to document so it will still function
+	        // when the user drags quickly and leaves the bounds of the element.
+	        onMouseDown: this.onMouseDown,
+	        onTouchStart: this.onTouchStart,
+	        onMouseUp: this.handleDragStop,
+	        onTouchEnd: this.handleDragStop
+	      });
+	    }
+	  }]);
+	
 	  return DraggableCore;
 	})(_react2['default'].Component);
 	
 	exports['default'] = DraggableCore;
 	module.exports = exports['default'];
 
-	// When the user scrolls, adjust internal state so the draggable moves along the page properly.
-	// This only fires when a drag is active.
+	// Start drag, listen for further mouse events
 
-	// On mousedown, consider the drag started.
-
-	// Same as onMouseDown (start drag), but now consider this a touch device.
+	// Start drag, listen for further touch events
 
 /***/ },
 /* 11 */
@@ -1363,11 +1393,311 @@ return /******/ (function(modules) { // webpackBootstrap
 	});
 	exports["default"] = log;
 	
-	function log() {
-	  if ((undefined)) console.log.apply(console, arguments);
+	function log(str, data) {
+	  if ((undefined)) arguments.length > 1 ? console.log(str, data) : console.log(str);
 	}
 	
 	module.exports = exports["default"];
+
+/***/ },
+/* 12 */
+/***/ function(module, exports, __webpack_require__) {
+
+	'use strict';
+	
+	Object.defineProperty(exports, '__esModule', {
+		value: true
+	});
+	
+	function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { 'default': obj }; }
+	
+	function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError('Cannot call a class as a function'); } }
+	
+	var _domFns = __webpack_require__(6);
+	
+	var _reactDom = __webpack_require__(3);
+	
+	var _reactDom2 = _interopRequireDefault(_reactDom);
+	
+	//
+	// Define ScrollManager.
+	//
+	// ScrollManager hooks into <Draggable>'s event handling and manages scrolling behavior.
+	// It has 2 jobs to do:
+	//	 1. adjust offsets if the parent DOM element scrolls.
+	//	 2. scroll the parent DOM element if the drag gets close to the edge.
+	//
+	// ScrollManagers are meant to be transient; create one when a drag starts, call `destroy`
+	// when the drag ends.
+	
+	var defaultOptions = {
+		// How close you need to get to the edge before we start scrolling (in px).
+		// Setting to 40 makes it easier to initiate scrolling on mobile devices, but it's not so large as
+		// to cause lots of unwanted scrolls.
+		// Set to <= 0 to disable scrolling.
+		scrollThreshold: 40,
+		// Callback for scroll events
+		onScroll: function onScroll() {}
+	};
+	
+	var overflowRegex = /(auto|scroll)/;
+	
+	var topElement = window;
+	
+	// Get the current x/y scroll for the given element.
+	function getScrollAmount(element) {
+		if (element === topElement) {
+			return {
+				x: window.pageXOffset,
+				y: window.pageYOffset
+			};
+		}
+		return {
+			x: element.scrollLeft,
+			y: element.scrollTop
+		};
+	}
+	
+	// Simple fallback for browsers that aren't down with requestAnimationFrame (e.g., IE9)
+	var raf = window.requestAnimationFrame || function (fn) {
+		return setTimeout(fn, 16 /* 60fps -> 16ms */);
+	};
+	var caf = window.cancelAnimationFrame || function (i) {
+		return clearTimeout(i);
+	};
+	
+	var ScrollManager = function ScrollManager(inOptions) {
+		var _this = this;
+	
+		_classCallCheck(this, ScrollManager);
+	
+		this.isScrollOnDrag = function () {
+			return _this.options.scrollThreshold > 0;
+		};
+	
+		this.getScrollBounds = function () {
+			if (!_this.isScrollOnDrag()) {
+				return null;
+			}
+	
+			if (_this.options.element === topElement) {
+				// when scrolling the body, it's easiest to use client coordinates
+				return { top: 0, bottom: window.innerHeight, left: 0, right: window.innerWidth };
+			}
+	
+			var bcr = _this.options.element.getBoundingClientRect();
+			// Offset the boundingCLientRect to get page coordinates; this lets us do fewer
+			// scroll offset calculations.
+			return {
+				top: bcr.top + window.pageYOffset,
+				bottom: bcr.bottom + window.pageYOffset,
+				left: bcr.left + window.pageXOffset,
+				right: bcr.right + window.pageXOffset
+			};
+		};
+	
+		this.destroy = function () {
+			if (_this.noop) {
+				return;
+			}
+	
+			if (_this.state.raf) {
+				caf(_this.state.raf);
+				_this.state.raf = null;
+			}
+			_this.detachEvents();
+		};
+	
+		this.attachEvents = function () {
+			(0, _domFns.addEvent)(_this.options.element, 'scroll', _this.handleScroll);
+		};
+	
+		this.detachEvents = function () {
+			(0, _domFns.removeEvent)(_this.options.element, 'scroll', _this.handleScroll);
+		};
+	
+		this.checkScroll = function (position) {
+			if (!_this.isScrollOnDrag()) {
+				return;
+			}
+	
+			// Scroll if appropriate.
+			var scrollingX = 0,
+			    scrollingY = 0,
+			    scrollThreshold = _this.options.scrollThreshold;
+			var x = undefined,
+			    y = undefined;
+			if (_this.options.element === topElement) {
+				x = position.clientX;y = position.clientY;
+			} else {
+				x = position.pageX;y = position.pageY;
+			}
+	
+			if (x < _this.state.scrollBounds.left + scrollThreshold) {
+				// scroll left
+				scrollingX = -_this.state.scrollBounds.left - scrollThreshold + x;
+			} else if (x > _this.state.scrollBounds.right - scrollThreshold) {
+				// scroll right
+				scrollingX = x - _this.state.scrollBounds.right + scrollThreshold;
+			}
+	
+			if (y < _this.state.scrollBounds.top + scrollThreshold) {
+				// scroll up
+				scrollingY = -_this.state.scrollBounds.top - scrollThreshold + y;
+			} else if (y > _this.state.scrollBounds.bottom - scrollThreshold) {
+				// scroll down
+				scrollingY = y - _this.state.scrollBounds.bottom + scrollThreshold;
+			}
+	
+			_this.state.scrollingX = scrollingX;
+			_this.state.scrollingY = scrollingY;
+	
+			// Initiate scrolling if appropriate
+			var self = _this;
+			if (scrollingX || scrollingY) {
+				if (!_this.state.raf) {
+					_this.state.raf = raf(function () {
+						return self.doScroll();
+					});
+				}
+			} else {
+				// Cancel any outstanding scrolls.
+				if (_this.state.raf) {
+					caf(_this.state.raf);
+					_this.state.raf = null;
+				}
+			}
+		};
+	
+		this.doScroll = function () {
+			var maxScrollSpeed = 100;
+	
+			// Use a square relationship to make scrolling accelerate as you approach the limit.
+			function getScrollDelta(val, threshold) {
+				// Squares are always positive, so make sure we remember if this is a negative.
+				var neg = 1;
+				if (val < 0) {
+					neg = -1;
+					val = -val;
+				}
+				val = Math.min(val / threshold, 1);
+				return Math.ceil(val * val * maxScrollSpeed * neg);
+			}
+	
+			var element = _this.options.element,
+			    self = _this;
+			var deltaX = getScrollDelta(self.state.scrollingX, self.options.scrollThreshold),
+			    deltaY = getScrollDelta(self.state.scrollingY, self.options.scrollThreshold);
+	
+			if (_this.state.scrollingX || _this.state.scrollingY) {
+				// Do the scroll
+				if (element === topElement) {
+					window.scrollBy(deltaX, deltaY);
+				} else {
+					element.scrollLeft += deltaX;
+					element.scrollTop += deltaY;
+				}
+	
+				// Keep scrolling
+				_this.state.raf = raf(function () {
+					return self.doScroll();
+				});
+	
+				// There's usually no need to call handleScroll explicitly here, since updating
+				// the scrollTop will trigger the "scroll" event.
+				// IE9, however, will not trigger the event for
+			} else {
+					// Done scrolling
+					_this.state.raf = null;
+				}
+		};
+	
+		this.handleScroll = function (e) {
+			// Determine deltas
+	
+			var _getScrollAmount = getScrollAmount(_this.options.element);
+	
+			var x = _getScrollAmount.x;
+			var y = _getScrollAmount.y;
+	
+			var deltaX = x - _this.state.scrollX;
+			var deltaY = y - _this.state.scrollY;
+	
+			if (deltaX || deltaY) {
+				// update state to reflect current values
+				_this.state.scrollX = x;
+				_this.state.scrollY = y;
+	
+				// notify listener
+				_this.options.onScroll({
+					event: e,
+					isPage: _this.options.element === topElement,
+					scroll: { x: x, y: y },
+					delta: { x: deltaX, y: deltaY }
+				});
+			}
+		};
+	
+		if (!inOptions || !inOptions.draggable) {
+			throw 'ScrollManager needs a draggable to work with.';
+		}
+		this.options = {};
+		for (var opt in defaultOptions) {
+			this.options[opt] = inOptions[opt] === undefined ? defaultOptions[opt] : inOptions[opt];
+		}
+	
+		if (!this.options.element) {
+			// Find the first scrollable parent.
+			// If none, then use the topElement.
+			// Adapted from jQuery's $.fn.scrollParent
+	
+			var draggableNode = _reactDom2['default'].findDOMNode(inOptions.draggable),
+			    parentNode = draggableNode.parentElement,
+			    elementStyle = window.getComputedStyle(draggableNode),
+			    position = elementStyle.position,
+			    excludeStaticParent = position === 'absolute',
+			    parentStyle = undefined,
+			    scrollParent = undefined;
+	
+			if (position === 'fixed') {
+				// fixed elements shouldn't take scrolling into account, so we have nothing to do here.
+				this.noop = true;
+				return;
+			}
+	
+			while (parentNode && !scrollParent) {
+				parentStyle = window.getComputedStyle(parentNode);
+				if (!excludeStaticParent || parentStyle.position !== 'static') {
+					if (overflowRegex.test(parentStyle.overflow + parentStyle.overflowY + parentStyle.overflowX)) {
+						scrollParent = parentNode;
+					}
+				}
+				parentNode = parentNode.parentElement;
+			}
+	
+			this.options.element = scrollParent || topElement;
+		}
+	
+		// Snapshot the original scroll location
+		var scrollAmount = getScrollAmount(this.options.element);
+		this.state = {
+			scrollX: scrollAmount.x,
+			scrollY: scrollAmount.y,
+			scrollingX: 0,
+			scrollingY: 0,
+			scrollBounds: this.getScrollBounds(),
+			raf: null
+		};
+	
+		this.attachEvents();
+	};
+	
+	exports['default'] = ScrollManager;
+	module.exports = exports['default'];
+
+	// Calculate the boundaries of the scroll parent
+
+	// Check to see if we should be scrolling.
 
 /***/ }
 /******/ ])

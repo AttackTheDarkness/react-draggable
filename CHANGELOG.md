@@ -1,5 +1,29 @@
 # Changelog
 
+### 1.1.4 (Jan 25, 2015)
+
+- Support scrolling in the body, as well as child elements.
+- Add autoscrolling; the container will scroll in the appropriate direction when you drag a Draggable close
+  to the container's borders.
+- Moved all scrolling-related logic into the ScrollManager utility class.
+- Draggables cancel the touchstart/mousedown event when the event clears the handle checks. This gets rid
+  of spurious scrolling on touch devices (drags are typically treated as scrolls on touch devices) and removes
+  the need to explicitly set/reset the `user-select` style.
+  -- This means that draggables can no longer be scrolled on a touch device, but that use case was already
+     problematic since the drag event in such a case in ambiguous (drag, or scroll? Or both?). If you need
+     scrollable draggables, use a `handle` for a sane user experience.
+- Made DraggableCore the mouse/touch event tracking module; the fancier stuff (bounds enforcement, scrolling,
+  grid alignment) is Draggable's responsibility now.
+- Fixed a bug where elements with `bounds` would lose sync with the pointer when it moved outside the bounds
+  then moved back towards the bounds. The rendered offset of the widget and the pointer offset are now
+  tracked separately during the drag.
+- Fixed weird dragging behavior on zoomed-in viewports on Android Chrome.
+- Support moving from mouse to touch (and vice versa) for hybrid devices (e.g., Microsoft Surface).
+- Renamed usage of clientX/Y variables that weren't actually clientX/Y, but rather were offsets. I found this
+  really confusing whilst debugging.
+- Cleaned up some spurious `%j`s that were getting logged to the console.
+- Draggable no longer inherits from DraggableCore, since that didn't make sense.
+
 ### 1.1.3 (Nov 25, 2015)
 
 - Bugfix: Server-side rendering with react-rails, which does bad things like mock `window`

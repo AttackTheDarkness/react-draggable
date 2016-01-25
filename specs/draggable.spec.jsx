@@ -179,10 +179,7 @@ describe('react-draggable', function () {
       // but <DraggableCore> attaches event listeners directly to the document.
       // Would love to new MouseEvent() here but it doesn't work with PhantomJS / old browsers.
       // var e = new MouseEvent('mousemove', {clientX: 100, clientY: 100});
-      var evt = document.createEvent('MouseEvents');
-      evt.initMouseEvent('mousemove', true, true, window,
-          0, 0, 0, 100, 100, false, false, false, false, 0, null);
-      document.dispatchEvent(evt);
+      mouseMove(node, 100, 100);
       TestUtils.Simulate.mouseUp(node);
 
       var style = node.getAttribute('style');
@@ -226,44 +223,6 @@ describe('react-draggable', function () {
       var transform = node.getAttribute('transform');
       expect(transform.indexOf('translate(100,100)')).not.toEqual(-1);
 
-    });
-
-    it('should add and remove user-select styles', function () {
-      // Karma runs in firefox in our tests
-      var userSelectStyle = ';user-select: none;' + dashedBrowserPrefix + 'user-select: none;';
-
-      drag = TestUtils.renderIntoDocument(
-        <Draggable>
-          <div />
-        </Draggable>
-      );
-
-      var node = ReactDOM.findDOMNode(drag);
-
-      expect(document.body.getAttribute('style')).toEqual('');
-      TestUtils.Simulate.mouseDown(node, {clientX: 0, clientY: 0});
-      expect(document.body.getAttribute('style')).toEqual(userSelectStyle);
-      TestUtils.Simulate.mouseUp(node);
-      expect(document.body.getAttribute('style')).toEqual('');
-    });
-
-    it('should not add and remove user-select styles when disabled', function () {
-      // Karma runs in firefox in our tests
-      var userSelectStyle = ';user-select: none;' + dashedBrowserPrefix + 'user-select: none;';
-
-      drag = TestUtils.renderIntoDocument(
-        <Draggable enableUserSelectHack={false}>
-          <div />
-        </Draggable>
-      );
-
-      var node = ReactDOM.findDOMNode(drag);
-
-      expect(document.body.getAttribute('style')).toEqual('');
-      TestUtils.Simulate.mouseDown(node, {clientX: 0, clientY: 0});
-      expect(document.body.getAttribute('style')).toEqual('');
-      TestUtils.Simulate.mouseUp(node);
-      expect(document.body.getAttribute('style')).toEqual('');
     });
   });
 
@@ -319,10 +278,13 @@ describe('react-draggable', function () {
       expect(drag.state.dragging).toEqual(false);
     });
 
-    it('should modulate position on scroll', function (done) {
-      // This test fails in karma under PhantomJS & Firefox, scroll event quirks
-      var is_chrome = navigator.userAgent.toLowerCase().indexOf('chrome') > -1;
-      if (!is_chrome) return done();
+    it('should modulate position on window scroll', function (done) {
+      // PhantomJS will automatically expand the viewport when the body grows... see
+      // https://github.com/ariya/phantomjs/issues/10619. Don't bother running this test
+      // until the bug is fixed.
+      if (navigator.userAgent.toLowerCase().indexOf('phantomjs') > -1) {
+        return done();
+      }
 
       var dragCalled = false;
 
@@ -330,19 +292,126 @@ describe('react-draggable', function () {
         expect(coreEvent.deltaY).toEqual(500);
         dragCalled = true;
       }
+
+      // Make the body long enough to scroll
+      var spacerDom = document.createElement('div');
+      spacerDom.style.height = '10000px';
+      document.body.appendChild(spacerDom);
+
+      window.scrollTo(0,0);
+
       drag = TestUtils.renderIntoDocument(<Draggable onDrag={onDrag}><div/></Draggable>);
       var node = ReactDOM.findDOMNode(drag);
 
-      TestUtils.Simulate.mouseDown(ReactDOM.findDOMNode(drag)); // start drag so window listener is up
+      TestUtils.Simulate.mouseDown(ReactDOM.findDOMNode(drag), {clientX: 0, clientY: 0}); // start drag so window listener is up
       expect(drag.state.dragging).toEqual(true);
+      
+      window.scrollBy(0,500);
 
-      document.body.style.height = '10000px';
-      window.scrollTo(0, 500);
       setTimeout(function() {
+
         expect(dragCalled).toEqual(true);
-        expect(drag.state.clientY).toEqual(500);
+        expect(drag.state.dragY).toEqual(500);
+
+        document.body.removeChild(spacerDom);
+
         done();
-      }, 50);
+      }, 0);
+    });
+
+    it('should modulate position on container scroll', function (done) {
+      var dragCalled = false;
+
+      function onDrag(e, coreEvent) {
+        expect(coreEvent.deltaY).toEqual(50);
+        dragCalled = true;
+      }
+
+      // Make a scrollable div
+      var scrollerDom = document.createElement('div');
+      scrollerDom.style.maxHeight = '100px';
+      scrollerDom.style.overflowY = 'scroll';
+
+      var spacerDom = document.createElement('div');
+      spacerDom.style.height = '10000px';
+
+      scrollerDom.appendChild(spacerDom);
+      document.body.appendChild(scrollerDom);
+
+      drag = ReactDOM.render(<Draggable onDrag={onDrag}><div/></Draggable>, spacerDom);
+      var node = ReactDOM.findDOMNode(drag);
+
+      TestUtils.Simulate.mouseDown(node, {clientX: 0, clientY: 0}); // start drag so window listener is up
+      expect(drag.state.dragging).toEqual(true);
+      
+      scrollerDom.scrollTop = 50;
+
+      setTimeout(function() {
+        
+        expect(dragCalled).toEqual(true);
+        expect(drag.state.dragY).toEqual(50);
+
+        document.body.removeChild(scrollerDom);
+
+        done();
+      }, 20);
+    });
+
+    it('should scroll the body when a drag gets close to the edge', function (done) {
+      // PhantomJS will automatically expand the viewport when the body grows... see
+      // https://github.com/ariya/phantomjs/issues/10619. Don't bother running this test
+      // until the bug is fixed.
+      if (navigator.userAgent.toLowerCase().indexOf('phantomjs') > -1) {
+        return done();
+      }
+
+      // Make the body long enough to scroll
+      var spacerDom = document.createElement('div');
+      spacerDom.style.height = '10000px';
+      document.body.appendChild(spacerDom);
+
+      window.scrollTo(0,50);
+
+      drag = TestUtils.renderIntoDocument(<Draggable><div/></Draggable>);
+      var node = ReactDOM.findDOMNode(drag);
+
+      TestUtils.Simulate.mouseDown(node, {clientX: 0, clientY: 50, pageX: 0, pageY: 50}); // start drag so window listener is up
+      
+      mouseMove(node, 0, 0);
+
+      setTimeout(function() {
+        expect(window.pageYOffset).toBeLessThan(50);
+        document.body.removeChild(spacerDom);
+        done();
+      }, 20); // scroll relies on requestAnimationFrame, so set a timeout for after that fires
+    });
+
+    it('should scroll the container when a drag gets close to the edge', function (done) {
+      // Make a scrollable div
+      var scrollerDom = document.createElement('div');
+      scrollerDom.style.maxHeight = '100px';
+      scrollerDom.style.overflowY = 'scroll';
+
+      var spacerDom = document.createElement('div');
+      spacerDom.style.height = '10000px';
+
+      scrollerDom.appendChild(spacerDom);
+      document.body.appendChild(scrollerDom);
+
+      scrollerDom.scrollTop = 50;
+
+      drag = ReactDOM.render(<Draggable><div/></Draggable>, spacerDom);
+      var node = ReactDOM.findDOMNode(drag);
+
+      TestUtils.Simulate.mouseDown(node, {clientX: 0, clientY: 50, pageX: 0, pageY: 50}); // start drag so window listener is up
+      
+      mouseMove(node, 0, 0);
+
+      setTimeout(function() {
+        expect(scrollerDom.scrollTop).toBeLessThan(50);
+        document.body.removeChild(scrollerDom);
+        done();
+      }, 20); // scroll relies on requestAnimationFrame, so set a timeout for after that fires
     });
   });
 

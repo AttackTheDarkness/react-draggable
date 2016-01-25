@@ -128,7 +128,11 @@ bounds: {left: number, top: number, right: number, bottom: number} | string,
 grid: [number, number],
 
 // Specifies the zIndex to use while dragging.
-zIndex: number
+zIndex: number,
+
+// Specifies how close the drag should get to the edge of the closest scrolling
+// container, before scrolling. Values <= 0 will disable autoscroll.
+scrollThreshold: number
 }
 ```
 

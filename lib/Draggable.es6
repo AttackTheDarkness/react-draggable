@@ -2,17 +2,34 @@ import {default as React, PropTypes} from 'react';
 import ReactDOM from 'react-dom';
 import classNames from 'classnames';
 import assign from 'object-assign';
-import {createUIEvent, createTransform} from './utils/domFns';
-import {canDragX, canDragY, getBoundPosition} from './utils/positionFns';
+import {createTransform} from './utils/domFns';
+import {canDragX, canDragY, getBoundPosition, snapToGrid} from './utils/positionFns';
 import {dontSetMe} from './utils/shims';
 import DraggableCore from './DraggableCore';
 import log from './utils/log';
+import {default as ScrollManager} from './utils/ScrollManager';
+
+function createUIEvent(node, position, state) {
+  let {pageX, pageY} = position;
+  let offsetX = pageX - state.startPageX + state.scrollOffsetX;
+  let offsetY = pageY - state.startPageY + state.scrollOffsetY;
+
+  return {
+    node: node,
+    position: {
+      left: offsetX,
+      top: offsetY
+    },
+    deltaX: offsetX - state.lastOffsetX,
+    deltaY: offsetY - state.lastOffsetY
+  };
+}
 
 //
 // Define <Draggable>
 //
 
-export default class Draggable extends DraggableCore {
+export default class Draggable extends React.Component {
 
   static displayName = 'Draggable';
 
@@ -65,6 +82,25 @@ export default class Draggable extends DraggableCore {
     ]),
 
     /**
+     * `grid` specifies the x and y that dragging should snap to.
+     *
+     * Example:
+     *
+     * ```jsx
+     *   let App = React.createClass({
+     *       render: function () {
+     *           return (
+     *               <Draggable grid={[25, 25]}>
+     *                   <div>I snap to a 25 x 25 grid</div>
+     *               </Draggable>
+     *           );
+     *       }
+     *   });
+     * ```
+     */
+    grid: PropTypes.arrayOf(PropTypes.number),
+
+    /**
      * `start` specifies the x and y that the dragged item should start at
      *
      * Example:
@@ -106,6 +142,28 @@ export default class Draggable extends DraggableCore {
     zIndex: PropTypes.number,
 
     /**
+     * `scrollThreshold` specifies how close the user needs to drag from the edge of
+     * the body / scrollParent before scrolling starts. Value is in px.
+     * 0 or negative values will disable the autoscrolling.
+     * Default is 40.
+     *
+     * Example:
+     *
+     * ```jsx
+     *   let App = React.createClass({
+     *       render: function () {
+     *           return (
+     *               <Draggable scrollThreshold={100}>
+     *                   <div>Drag me close to an edge</div>
+     *               </Draggable>
+     *           );
+     *       }
+     *   });
+     * ```
+     */
+    scrollThreshold: PropTypes.number,
+
+    /**
      * These properties should be defined on the child, not here.
      */
     className: dontSetMe,
@@ -117,15 +175,20 @@ export default class Draggable extends DraggableCore {
     axis: 'both',
     bounds: false,
     start: {x: 0, y: 0},
-    zIndex: NaN
+    zIndex: NaN,
+    scrollThreshold: 40
   });
 
   state = {
-    // Whether or not we are currently dragging.
     dragging: false,
 
     // Current transform x and y.
-    clientX: this.props.start.x, clientY: this.props.start.y,
+    offsetX: this.props.start.x,
+    offsetY: this.props.start.y,
+
+    // Offset due to the current drag.
+    dragX: 0,
+    dragY: 0,
 
     // Can only determine if SVG after mounting
     isElementSVG: false
@@ -138,53 +201,131 @@ export default class Draggable extends DraggableCore {
     }
   }
 
+  cleanupScrollManager = () => {
+    if (this.state.scrollManager) {
+      this.state.scrollManager.destroy();
+    }
+  }
+
+  componentWillUnmount() {
+    // Clean up the scroll manager if we're destroyed mid-drag.
+    this.cleanupScrollManager();
+  }
+
   onDragStart = (e, coreEvent) => {
-    log('Draggable: onDragStart: %j', coreEvent.position);
+    log('Draggable: onDragStart: ', coreEvent.position);
+
+    let {pageX, pageY} = coreEvent.position;
+    let state = {dragging: true, startPageX: pageX, startPageY: pageY, lastPageX: pageX, lastPageY: pageY, lastOffsetX: 0, lastOffsetY: 0, scrollOffsetX: 0, scrollOffsetY: 0};
 
     // Short-circuit if user's callback killed it.
-    let shouldStart = this.props.onStart(e, createUIEvent(this, coreEvent));
+    let shouldStart = this.props.onStart(e, createUIEvent(ReactDOM.findDOMNode(this), coreEvent.position, state));
     // Kills start event on core as well, so move handlers are never bound.
     if (shouldStart === false) return false;
 
-    this.setState({dragging: true});
+    this.cleanupScrollManager(); // better safe than sorry
+    state.scrollManager = new ScrollManager({draggable: this, onScroll: this.handleScroll, scrollThreshold: this.props.scrollThreshold});
+
+    this.setState(state);
   };
 
-  onDrag = (e, coreEvent) => {
-    if (!this.state.dragging) return false;
-    log('Draggable: onDrag: %j', coreEvent.position);
+  onMove = (e, position, state) => {
+    state = state || this.state;
+    let uiEvent = createUIEvent(ReactDOM.findDOMNode(this), position, state);
 
-    let uiEvent = createUIEvent(this, coreEvent);
+    let dragX = uiEvent.position.left, dragY = uiEvent.position.top;
+
+    let offsetX = state.offsetX + dragX, offsetY = state.offsetY + dragY;
+
+    // Snap to grid if prop has been provided
+    if (Array.isArray(this.props.grid)) {
+      [offsetX, offsetY] = snapToGrid(this.props.grid, offsetX, offsetY);
+    }
+
+    // Keep within bounds.
+    if (this.props.bounds) {
+      [offsetX, offsetY] = getBoundPosition(this, offsetX, offsetY);
+    }
+
+    dragX = offsetX - state.offsetX;
+    dragY = offsetY - state.offsetY;
+
+    let newState = {
+      lastOffsetX: uiEvent.position.left,
+      lastOffsetY: uiEvent.position.top,
+      dragX: dragX,
+      dragY: dragY,
+      lastPageX: position.pageX,
+      lastPageY: position.pageY
+    };
 
     // Short-circuit if user's callback killed it.
     let shouldUpdate = this.props.onDrag(e, uiEvent);
     if (shouldUpdate === false) return false;
 
-    let newState = {
-      clientX: uiEvent.position.left,
-      clientY: uiEvent.position.top
-    };
-
-    // Keep within bounds.
-    if (this.props.bounds) {
-      [newState.clientX, newState.clientY] = getBoundPosition(this, newState.clientX, newState.clientY);
-    }
-
     this.setState(newState);
   };
 
-  onDragStop = (e, coreEvent) => {
-    if (!this.state.dragging) return false;
+  handleScroll = (scrollInfo) => {
+    let state = this.state;
 
+    let position = {pageX: this.state.lastPageX, pageY: this.state.lastPageY};
+
+    if (scrollInfo.isPage) {
+      // If the scrolling element is the page, the pointer has "moved" in relation
+      // to the page.
+      position.pageX = this.state.lastPageX + scrollInfo.delta.x;
+      position.pageY = this.state.lastPageY + scrollInfo.delta.y;
+    } else {
+      // If the scrolling element is a child of the page, update the scrollOffset.
+      let newState = {
+        scrollOffsetX: this.state.scrollOffsetX + scrollInfo.delta.x,
+        scrollOffsetY: this.state.scrollOffsetY + scrollInfo.delta.y
+      };
+
+      this.setState(newState);
+      // setState is async, so let's create an updated state that we can pass through
+      state = assign({}, this.state, newState);
+    }
+
+    this.onMove(scrollInfo.event, position, state);
+  };
+
+  onDrag = (e, coreEvent) => {
+    log('Draggable: onDrag: ', JSON.stringify(coreEvent.position));
+
+    this.state.scrollManager.checkScroll(coreEvent.position);
+    this.onMove(e, coreEvent.position);
+  };
+
+  onDragStop = (e, coreEvent) => {
     // Short-circuit if user's callback killed it.
-    let shouldStop = this.props.onStop(e, createUIEvent(this, coreEvent));
+    let shouldStop = this.props.onStop(e, createUIEvent(ReactDOM.findDOMNode(this), coreEvent.position, this.state));
     if (shouldStop === false) return false;
 
-    log('Draggable: onDragStop: %j', coreEvent.position);
+    log('Draggable: onDragStop: ', coreEvent.position);
+
+    this.state.scrollManager.destroy();
 
     this.setState({
-      dragging: false
+      scrollManager: null,
+      dragging: false,
+      offsetX: this.state.offsetX + this.state.dragX,
+      offsetY: this.state.offsetY + this.state.dragY,
+      dragX: 0,
+      dragY: 0
     });
   };
+  
+  componentWillReceiveProps(nextProps) {
+    // If we're modifying the start location, offset our state by the difference.
+    if (nextProps.start.x !== this.props.start.x || nextProps.start.y !== this.props.start.y) {
+      this.setState({
+        offsetX: this.state.offsetX + nextProps.start.x - this.props.start.x,
+        offsetY: this.state.offsetY + nextProps.start.y - this.props.start.y
+      });
+    }
+  }
 
   render() {
     let style, svgTransform = null;
@@ -195,12 +336,12 @@ export default class Draggable extends DraggableCore {
     style = createTransform({
       // Set left if horizontal drag is enabled
       x: canDragX(this) ?
-        this.state.clientX :
+        this.state.offsetX + this.state.dragX :
         this.props.start.x,
 
       // Set top if vertical drag is enabled
       y: canDragY(this) ?
-        this.state.clientY :
+        this.state.offsetY + this.state.dragY :
         this.props.start.y
     }, this.state.isElementSVG);
 
